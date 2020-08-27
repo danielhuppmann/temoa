@@ -180,11 +180,19 @@ def pformat_results ( pyomo_instance, pyomo_result, options ):
 		svars['V_FlowIn'][p, s, d, i, t, v, o] = (val + value( m.V_FlowOut[p, s, d, i, t, v, o] )) / value(m.Efficiency[i, t, v, o])
 
 	# Extract optimal decision variable values related to capacity:
-	for t, v in m.V_Capacity:
-		val = value( m.V_Capacity[t, v] )
-		if abs(val) < epsilon: continue
+	if 'myopic' not in options.file_location:
+		for t, v in m.V_Capacity:
+			val = value( m.V_Capacity[t, v] )
+			if abs(val) < epsilon: continue
+	
+			svars['V_Capacity'][t, v] = val
+	else:
+		for t, v in m.V_Capacity:
+			if v in m.time_optimize:
+				val = value( m.V_Capacity[t, v] )
+				if abs(val) < epsilon: continue
+				svars['V_Capacity'][t, v] = val		
 
-		svars['V_Capacity'][t, v] = val
 
 	for p, t in m.V_CapacityAvailableByPeriodAndTech:
 		val = value( m.V_CapacityAvailableByPeriodAndTech[p, t] )
@@ -305,7 +313,8 @@ def pformat_results ( pyomo_instance, pyomo_result, options ):
 			   "V_CapacityAvailableByPeriodAndTech"   : "Output_CapacityByPeriodAndTech",  \
 			   "V_EmissionActivityByPeriodAndProcess" : "Output_Emissions", \
 			   "Objective"  : "Output_Objective", \
-			   "Costs"      : "Output_Costs" }
+			   #"Costs"      : "Output_Costs" 
+			   }
 	
 	db_tables = ['time_periods', 'time_season', 'time_of_day', 'technologies', 'commodities',\
 				'LifetimeTech', 'LifetimeProcess', 'Efficiency', 'EmissionActivity', 'ExistingCapacity']
@@ -392,7 +401,7 @@ def pformat_results ( pyomo_instance, pyomo_result, options ):
 			if table in tables :
 				cur.execute("SELECT DISTINCT scenario FROM '"+tables[table]+"'")
 				for val in cur : 
-					if options.scenario == val[0]: # If scenario exists, delete
+					if options.scenario == val[0] and 'myopic' not in options.file_location: # If scenario exists, delete
 						cur.execute("DELETE FROM "+tables[table]+" \
 									WHERE scenario is '"+options.scenario+"'") 
 				if table == 'Objective' : # Only table without sector info

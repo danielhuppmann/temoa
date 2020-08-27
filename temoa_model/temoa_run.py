@@ -139,7 +139,8 @@ class TemoaSolver(object):
 				.format( self.options.solver ))
 			if SE.isatty():
 				SE.write( "Please press enter to continue or Ctrl+C to quit." )
-				raw_input()
+				if 'myopic' not in self.options.file_location:
+					raw_input()
 
 
 	'''
@@ -223,16 +224,141 @@ class TemoaSolver(object):
 	This function is called when MGA option is not specified.
 	'''
 	def solveWithoutMGA(self):
+		
+		from IPython import embed as IP
+
 		temoaInstance1 = TemoaSolverInstance(self.model, self.optimizer, self.options, self.txt_file)
-		for k in temoaInstance1.create_temoa_instance():
-			# yield "<div>" + k + "</div>"
-			yield k
-			#yield " " * 1024
-		for k in temoaInstance1.solve_temoa_instance():
-			# yield "<div>" + k + "</div>"
-			yield k
-			#yield " " * 1024
-		temoaInstance1.handle_files(log_name='Complete_OutputLog.log')
+		if self.options.myopic:
+
+			print ('This run is myopic -- preparing the database...')
+			import sqlite3
+			import pandas as pd
+	
+			db_path_org = self.options.output
+			con_org = sqlite3.connect(db_path_org)
+			cur = con_org.cursor()			
+			table_list = cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+			time_periods = cur.execute("SELECT t_periods FROM time_periods WHERE flag='f'").fetchall()
+			loc1 = max(loc for loc, val in enumerate(self.options.output) if val == '/')
+			loc2 = max(loc for loc, val in enumerate(self.options.output) if val == '.')
+			db_name = self.options.output[loc1+1:loc2]
+			for i in range(0,len(time_periods)-1):
+				new_db = self.options.path_to_db_io+"/"+db_name+"_myopic_"+str(time_periods[i][0])+".db"
+				copyfile(self.options.path_to_db_io+"/"+"US_National_Blank.db", new_db)
+				con = sqlite3.connect(new_db)
+				cur = con.cursor()
+				table_list.sort()
+				for table in table_list:
+					try:
+						cur.execute("DELETE FROM "+str(table[0]) +" WHERE periods != "+str(time_periods[i][0])+";")
+						if str(table[0])=='CostFixed' or str(table[0])=='CostVariable':
+							cur.execute("DELETE FROM "+str(table[0]) +" WHERE vintage > "+str(time_periods[i][0])+";")
+						cur.execute("VACUUM")
+					except:
+						try:
+							if str(table[0])=='CostInvest' or str(table[0])=='DiscountRate':
+								cur.execute("UPDATE "+table[0]+" SET tech = TRIM(tech);")
+								cur.execute("DELETE FROM "+str(table[0]) +" WHERE vintage != "+str(time_periods[i][0])+";")
+							else:
+								cur.execute("DELETE FROM "+str(table[0]) +" WHERE vintage > "+str(time_periods[i][0])+";")
+							cur.execute("VACUUM")
+						except:
+							try:
+								cur.execute("DELETE FROM "+str(table[0]) +" WHERE t_periods > "+str(time_periods[i][0])+";")
+								cur.execute("VACUUM")
+							except:
+								pass
+				
+				cur.execute("UPDATE Efficiency SET tech = TRIM(tech);") #trim spaces. Need to trim carriage return
+				
+				cur.execute("DELETE FROM Efficiency WHERE tech IN (SELECT tech FROM LifetimeProcess WHERE \
+							 LifetimeProcess.life_process+LifetimeProcess.vintage<="+str(time_periods[i][0])+") \
+							 AND vintage IN (SELECT vintage FROM LifetimeProcess WHERE LifetimeProcess.life_process+\
+							 LifetimeProcess.vintage<="+str(time_periods[i][0])+");")
+				
+				cur.execute("DELETE FROM Efficiency WHERE tech IN (SELECT tech FROM LifetimeTech WHERE \
+							 LifetimeTech.life+Efficiency.vintage<="+str(time_periods[i][0])+");")
+				
+				cur.execute("DELETE FROM Efficiency WHERE tech IN (SELECT tech FROM Efficiency WHERE 40+Efficiency.vintage<="+str(time_periods[i][0])+");")
+				
+				cur.execute("DELETE FROM Efficiency WHERE output_comm NOT IN (SELECT input_comm FROM Efficiency) \
+							 AND output_comm NOT IN (SELECT comm_name FROM commodities WHERE flag='d');")
+				cur.execute("DELETE FROM Efficiency WHERE output_comm NOT IN (SELECT input_comm FROM Efficiency) \
+							 AND output_comm NOT IN (SELECT comm_name FROM commodities WHERE flag='d');")
+				
+				
+
+				if i!=0:
+					df_new_ExistingCapacity = pd.read_sql_query("SELECT tech,vintage,capacity FROM Output_V_Capacity \
+																 WHERE scenario="+"'"+str(self.options.scenario)+"';", con_org) 
+					df_new_ExistingCapacity.columns = ['tech','vintage','exist_cap']
+					df_new_ExistingCapacity.to_sql('ExistingCapacity',con, if_exists='append', index=False)
+					#Create a copy of the first time period vintages for the current vintage 
+					#to prevent infeasibility (if it is not an 'existing' vintage in the 
+					#original database and if it doesn't already have a current vintage).					
+					cur.execute("INSERT INTO Efficiency \
+								 SELECT DISTINCT input_comm,tech,"+str(time_periods[i][0])+ \
+								 ",output_comm,efficiency,eff_notes FROM Efficiency WHERE tech NOT IN (SELECT tech \
+								 FROM Efficiency WHERE vintage<"+str(time_periods[0][0])+") AND tech NOT IN (SELECT \
+								 tech FROM Efficiency WHERE vintage="+str(time_periods[i][0])+");")
+
+					# delete (t,v) from efficiecny table if it doesn't appear in the ExistingCapacity (v is an existing vintage)
+					cur.execute("DELETE FROM Efficiency \
+								 WHERE vintage <= "+str(time_periods[i-1][0])+" AND vintage NOT IN (SELECT \
+								 vintage FROM ExistingCapacity WHERE Efficiency.tech=ExistingCapacity.tech);")
+				
+				for table in table_list:
+					try:
+						cur.execute("UPDATE "+str(table[0])+" SET tech = TRIM(tech, CHAR(37,10));")
+						cur.execute("DELETE FROM "+str(table[0])+" WHERE tech NOT IN (SELECT tech FROM Efficiency);")
+						cursor = con.execute("SELECT * FROM "+str(table[0]))
+						names = list(map(lambda x: x[0], cursor.description))
+						if 'vintage' in names:
+							#similar to what was done for the Efficiecny table, 
+							if table[0]!='Efficiency' and table[0]!='ExistingCapacity':
+								names = [str(time_periods[i][0]) if x=='vintage' else x for x in names]
+								cur.execute("INSERT INTO "+table[0]+" SELECT DISTINCT "+",".join(names)+\
+											 " FROM "+table[0]+" WHERE tech NOT IN (SELECT tech FROM "+table[0]+\
+											 " WHERE vintage<"+str(time_periods[0][0])+") AND tech NOT IN (SELECT tech FROM "+\
+											 table[0]+" WHERE vintage="+str(time_periods[i][0])+");"
+											 )
+							# If (t,v) is not found in the Efficiecny table, deelte it from all the other tables
+							cur.execute("DELETE FROM "+str(table[0])+" WHERE tech IN (SELECT tech FROM Efficiency) AND vintage \
+											 NOT IN (SELECT vintage FROM Efficiency WHERE Efficiency.tech="+str(table[0])+".tech);")								
+
+				
+					except:
+						pass
+				
+				cur.execute("UPDATE commodities SET comm_name = TRIM(comm_name, CHAR(37,10))")
+				cur.execute("DELETE FROM commodities WHERE flag!='e' AND comm_name NOT IN (SELECT input_comm from Efficiency UNION SELECT output_comm from Efficiency);")
+				cur.execute("INSERT INTO `time_periods` (t_periods,flag) VALUES ("+str(time_periods[i+1][0])+",'f');")
+				cur.execute("UPDATE `time_periods` SET flag='e' WHERE t_periods < "+str(time_periods[i][0]))
+				con.commit()
+				con.close()
+
+	
+				new_config = os.getcwd()+"/temoa_model/config_sample_myopic_"+str(time_periods[i][0])
+				ifile = open(os.getcwd()+"/temoa_model/config_sample")
+				ofile = open(new_config,'w')
+				for line in ifile:
+					new_line = line.replace("--input=data_files/"+db_name, "--input=data_files/"+db_name+"_myopic_"+str(time_periods[i][0]))
+					new_line = new_line.replace("--myopic","#--myopic")
+					ofile.write(new_line)
+				ifile.close()
+				ofile.close()
+				os.system("python temoa_model/ --config=temoa_model/config_sample_myopic_"+str(time_periods[i][0]))
+		else:
+
+			for k in temoaInstance1.create_temoa_instance():
+				# yield "<div>" + k + "</div>"
+				yield k
+				#yield " " * 1024
+			for k in temoaInstance1.solve_temoa_instance():
+				# yield "<div>" + k + "</div>"
+				yield k
+				#yield " " * 1024
+			temoaInstance1.handle_files(log_name='Complete_OutputLog.log')
 
 	'''
 	This funciton creates and solves TemoaSolverInstance.
@@ -378,7 +504,7 @@ class TemoaSolverInstance(object):
 				SE.write( '\r[%8.2f\n' % duration() )
 				self.txt_file.write( '[%8.2f]\n' % duration() )
 				yield formatted_results.getvalue() + '\n'
-				SO.write( formatted_results.getvalue() )
+				#SO.write( formatted_results.getvalue() )
 				self.txt_file.write( formatted_results.getvalue() )
 			else:
 				yield '\r---------- Not solving: no available solver\n'
@@ -548,7 +674,8 @@ def parse_args ( ):
 	SE.write("Continue Operation? [Press enter to continue or CTRL+C to abort]\n")
 	SE.flush()
 	try:  #make compatible with Python 2.7 or 3
-		raw_input() # Give the user a chance to confirm input
+		if 'myopic' not in options.file_location:
+			raw_input() # Give the user a chance to confirm input
 	except:
 		input()
 		

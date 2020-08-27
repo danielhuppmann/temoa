@@ -8,24 +8,32 @@
 # Input File (Mandatory) 
 # Input can be a .sqlite or .dat file
 # Both relative path and absolute path are accepted
---input=data_files/temoa_utopia.sqlite
+#--input=data_files/USNationalElec_short.sqlite
+#--input=data_files/US_National_myopic_2020.db
+--input=data_files/US_National.db
 
 # Output File (Mandatory)
 # The output file must be a existing .sqlite file
---output=data_files/temoa_utopia.sqlite
+#--output=data_files/USNationalElec_short.sqlite
+--output=data_files/US_National.db
+#--output=data_files/US_National_myopic_2020.db
 
 # Scenario Name (Mandatory) 
 # This scenario name is used to store results within the output .sqlite file
---scenario=test_run
+--scenario=myopic
+#--scenario=PF
 
 # Path to the “db_io” folder (Mandatory) 
 # This is the location where database files reside
 --path_to_db_io=data_files
 
+# solving myopically? (default=perfect foresight)
+--myopic
+
 # Spreadsheet Output (Optional) 
 # Direct model output to a spreadsheet
 # Scenario name specified above is used to name the spreadsheet
---saveEXCEL
+#--saveEXCEL
 
 # Save the log file output (Optional)
 # This is the same output provided to the shell

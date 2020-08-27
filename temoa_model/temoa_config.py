@@ -179,7 +179,17 @@ def db_2_dat(ifile, ofile, options):
 		if options.mga_weight == 'normalized':
 			write_tech_sector(f)
 			
-		
+		if options.myopic:
+   			cur.execute("DELETE FROM Output_CapacityByPeriodAndTech WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_Emissions WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_Costs WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_Objective WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_VFlow_In WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_VFlow_Out WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_V_Capacity WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("DELETE FROM Output_Curtailment WHERE scenario="+"'"+str(options.scenario)+"'")
+   			cur.execute("VACUUM")
+   			con.commit()			
 
 		cur.close()
 		con.close()
@@ -199,6 +209,7 @@ class TemoaConfig( object ):
 		'neos',
 		'keep_pyomo_lp_file',
 		'saveEXCEL',
+		'myopic'
 		'saveTEXTFILE',
 		'mgaslack',
 		'mgaiter',
@@ -225,6 +236,7 @@ class TemoaConfig( object ):
 		self.output           = None # May update to a list if multiple output is required.
 		self.scenario         = None
 		self.saveEXCEL        = False
+		self.myopic           = False
 		self.saveTEXTFILE     = False
 		self.how_to_cite      = None
 		self.version          = False
@@ -265,6 +277,7 @@ class TemoaConfig( object ):
 		msg += '{:>{}s}: {}\n'.format('Output file', width, self.output)
 		msg += '{:>{}s}: {}\n'.format('Scenario', width, self.scenario)	
 		msg += '{:>{}s}: {}\n'.format('Spreadsheet output', width, self.saveEXCEL)
+		msg += '{:>{}s}: {}\n'.format('Myopic scheme', width, self.myopic)
 		msg += spacer
 		msg += '{:>{}s}: {}\n'.format('Citation output status', width, self.how_to_cite)
 		msg += '{:>{}s}: {}\n'.format('NEOS status', width, self.neos)
@@ -299,6 +312,10 @@ class TemoaConfig( object ):
 	def t_saveEXCEL(self, t):
 		r'--saveEXCEL\b'
 		self.saveEXCEL = True
+
+	def t_myopic(self, t):
+		r'--myopic\b'
+		self.myopic = True
 	
 	def t_saveTEXTFILE(self, t):
 		r'--saveTEXTFILE\b'
